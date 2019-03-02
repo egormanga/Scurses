@@ -29,23 +29,29 @@ class SCWindow:
 		self.app = app
 		self.key_handlers = dict()
 		self.views = list()
+		self.inited = bool()
 		self.debugstr = str()
 
 	def init(self):
 		self.stdscr.nodelay(True)
 		for view in self.views:
 			view.init()
+		self.inited = True
 
 	def addView(self, view):
 		view.app = self.app or self
 		self.views.append(view)
+		if (self.inited): view.init()
 
 	def debugOut(self, *s, sep=' '):
-		self.debugstr = sep.join(map(str, s))
+		self.debugstr = S(sep.join(map(str, s))).wrap(self.stdscr.getmaxyx()[1]//2).split('\n')
 
 	def draw(self):
+		h, w = self.stdscr.getmaxyx()
 		if (self.views): self.views[-1].draw(self.stdscr)
-		if (self.debugstr): self.stdscr.addstr(0, (self.stdscr.getmaxyx()[1]-len(self.debugstr))//2-1, self.debugstr, curses.A_STANDOUT)
+		for ii, i in enumerate(self.debugstr):
+			if (ii >= h): break
+			self.stdscr.addstr(ii, (w-len(i))//2-1, i, curses.A_STANDOUT)
 
 	def key(self, c):
 		if (not c): return
@@ -212,6 +218,11 @@ class SCSelectingListView(SCListView):
 	def scrollToSelected(self):
 		if (self.t > self.n): self.t = max(self.n, 0)
 		if (self.t+self.h <= self.n): self.t = min(self.n-self.h+1, len(self.l)-self.h+1)
+
+	def selectAndScroll(self, n):
+		self.n = n
+		self.s = self.n
+		self.scrollToSelected()
 
 	def select(self):
 		self.s = self.n
