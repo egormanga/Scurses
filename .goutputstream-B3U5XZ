@@ -7,15 +7,7 @@ from utils import *; logstart('Scurses')
 
 class SCKey:
 	def __init__(self, c):
-		if (isinstance(c, SCKey)): self.c, self.ch = c.c, c.ch; return
-		if (isinstance(c, str)):
-			if (len(c) == 1):
-				self.ch = c
-				self.c = ord(self.ch)
-			elif (c[0] == '^' and len(c) == 2):
-				self.c = string.ascii_uppercase.index(c[-1])+1
-				self.ch = chr(self.c)
-			else: raise ValueError(c)
+		if (isinstance(c, str)): self.c, self.ch = ord(c) if (len(c) == 1) else string.ascii_letters.index(c[-1]) if (c[0] == '^' and len(c) == 2) else raise_(ValueError), c
 		elif (isinstance(c, int)): self.c, self.ch = c, chr(c) if (c != -1) else ''
 		else: raise TypeError()
 
@@ -39,8 +31,6 @@ class SCWindow:
 		self.views = list()
 		self.inited = bool()
 		self.waitrelease = None
-		self.waitrelease_pressed = bool()
-		self.waitrelease_lastpressed = int()
 		self.debugstr = str()
 
 	def init(self):
@@ -65,10 +55,8 @@ class SCWindow:
 			self.stdscr.addstr(ii, (w-len(i))//2-1, i, curses.A_STANDOUT)
 
 	def key(self, c):
+		if (c == self.waitrelease): self.waitrelease = None; return
 		if (not c): return
-		if (self.waitrelease):
-			if (c != self.waitrelease or time.time()-self.waitrelease_lastpressed > 0.05): self.waitrelease = None
-			else: self.waitrelease_lastpressed = time.time(); return
 		self.debugOut()
 		for view in self.views[::-1]:
 			r = view.key(c)
@@ -85,9 +73,7 @@ class SCWindow:
 		self.key_handlers[...] = f
 
 	def waitkeyrelease(self, c):
-		self.waitrelease = SCKey(c)
-		self.waitrelease_pressed = False
-		self.waitrelease_lastpressed = time.time()
+		self.waitrelease = c
 
 	def loop(self, *rargs):
 		self.draw()
@@ -105,9 +91,7 @@ class SCApp(SCWindow):
 	def loop(self):
 		self.draw()
 		curses.doupdate()
-		try: c = self.stdscr.get_wch()
-		except curses.error: c = -1
-		self.key(SCKey(c))
+		self.key(SCKey(self.stdscr.getch()))
 
 	def _run_loop(self, stdscr):
 		self.stdscr = stdscr
