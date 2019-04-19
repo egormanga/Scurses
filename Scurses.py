@@ -59,7 +59,7 @@ class SCWindow:
 
 	def draw(self):
 		h, w = self.stdscr.getmaxyx()
-		if (self.views): self.views[-1].draw(self.stdscr)
+		if (self.views): self.top.draw(self.stdscr)
 		for ii, i in enumerate(self.debugstr):
 			if (ii >= h): break
 			self.stdscr.addstr(ii, (w-len(i))//2-1, i, curses.A_STANDOUT)
@@ -92,6 +92,10 @@ class SCWindow:
 	def loop(self, *rargs):
 		self.draw()
 		self.stdscr.noutrefresh(*rargs)
+
+	@property
+	def top(self):
+		return self.views[-1]
 
 class SCApp(SCWindow):
 	def __init__(self, frame_rate=60):
@@ -138,9 +142,9 @@ class SCView:
 		" Key pressed callback "
 
 class SCSplitView(SCView, ABC):
-	def __init__(self, s, focus=0):
+	def __init__(self, *s, focus=0):
 		self.s, self.focus = s, focus
-		self.p = (SCWindow(), SCWindow())
+		self.p = (*(SCWindow() for _ in range(len(self.s)+1)),)
 
 	def init(self):
 		for i in self.p:
@@ -158,20 +162,18 @@ class SCSplitView(SCView, ABC):
 class SCVSplitView(SCSplitView):
 	def draw(self, stdscr):
 		self.h, self.w = stdscr.getmaxyx()
-		s = self.h+self.s if (self.s < 0) else self.s
-		self.p[0].stdscr.resize(s, self.w)
-		self.p[1].stdscr.resize(self.h-s, self.w)
-		self.p[0].loop(0, 0, 0, 0, s, self.w)
-		self.p[1].loop(0, 0, s, 0, self.h, self.w)
+		sl = (0, *(self.h+i if (i < 0) else i for i in self.s), self.h)
+		for i in range(len(sl)-1):
+			self.p[i].stdscr.resize(sl[i+1]-sl[i], self.w)
+			self.p[i].loop(0, 0, sl[i], 0, sl[i+1], self.w)
 
 class SCHSplitView(SCSplitView):
 	def draw(self, stdscr):
 		self.h, self.w = stdscr.getmaxyx()
-		s = self.w+self.s if (self.s < 0) else self.s
-		self.p[0].stdscr.resize(self.h, s)
-		self.p[1].stdscr.resize(self.h, self.w-s)
-		self.p[0].loop(0, 0, 0, 0, self.h, s)
-		self.p[1].loop(0, 0, 0, s, self.h, self.w)
+		sl = (0, *(self.w+i if (i < 0) else i for i in self.s), self.w)
+		for i in range(len(sl)-1):
+			self.p[i].stdscr.resize(self.h, sl[i+1]-sl[i])
+			self.p[i].loop(0, 0, 0, sl[i], self.h, sl[i+1])
 
 class SCListView(SCView):
 	def __init__(self, l):
@@ -182,7 +184,8 @@ class SCListView(SCView):
 	def draw(self, stdscr):
 		super().draw(stdscr)
 		for i in range(self.t, min(self.t+self.h, len(self.l))):
-			stdscr.addstr(i-self.t, 0, *self.item(i))
+			ret, text, attrs = self.item(i)
+			stdscr.addstr(i-self.t, 0, text, attrs)
 
 	def key(self, c):
 		if (c == curses.KEY_UP): self.t -= 1
@@ -191,7 +194,47 @@ class SCListView(SCView):
 		return True
 
 	def item(self, i):
-		return (str(self.l[i]), 0)
+		""" Return list item for `self.l[i]'
+		Return: (ret, text, attrs)
+			ret: force stop recursive subclass processing.
+			text: title for the item.
+			attrs: curses attributes for the item.
+		"""
+		return (False, str(self.l[i]), 0)
+
+class SCLoadingListView(SCListView):
+	class LoadItem:
+		def __init__(self, has_more=True, next_value=None):
+			self.has_more, self.next_value = has_more, next_value
+
+	def __init__(self, l):
+		super().__init__(l)
+		self.l.append(self.LoadItem())
+		self.toLoad = bool()
+		self.loading = bool()
+
+	def draw(self, stdscr):
+		super().draw(stdscr)
+		if (self.loading):
+			stdscr.addstr(0, 0, 'Loading'.center(self.w), curses.A_STANDOUT)
+			self.loading = False
+			return
+		if (not self.l and not self.toLoad):
+			self.toLoad = True
+			return
+		if (self.toLoad):
+			self.load()
+			self.toLoad = False
+
+	def load(self):
+		""" Load new items
+		Last item added should be a LoadItem.
+		Return: (ret)
+			ret: force stop recursive subclass processing.
+		"""
+		if (isinstance(self.l[-1], self.LoadItem)):
+			if (not self.l[-1].has_more): self.l[-1].next_value = None; return True
+		return False
 
 class SCSelectingListView(SCListView):
 	def __init__(self, l):
@@ -228,9 +271,10 @@ class SCSelectingListView(SCListView):
 		return True
 
 	def item(self, i):
-		text, attrs = super().item(i)
-		attrs |= curses.A_STANDOUT*(i==self.n) | curses.A_BOLD*(i==self.s)
-		return (text, attrs)
+		ret, text, attrs = super().item(i)
+		if (not ret):
+			attrs |= curses.A_STANDOUT*(i==self.n) | curses.A_BOLD*(i==self.s)
+		return (ret, text, attrs)
 
 	def scrollToTop(self):
 		self.n = 0
@@ -246,7 +290,41 @@ class SCSelectingListView(SCListView):
 		self.scrollToSelected()
 
 	def select(self):
+		""" Select currently highlighted item
+		Return: (ret)
+			ret: force stop recursive subclass processing.
+		"""
 		self.s = self.n
+		return False
+
+class SCLoadingSelectingListView(SCLoadingListView, SCSelectingListView):
+	def key(self, c):
+		if (c == curses.KEY_DOWN):
+			self.n = min(self.n+1, len(self.l)-1-(not self.l[-1].has_more))
+			self.scrollToSelected()
+		elif (c == curses.KEY_NPAGE):
+			self.n = min(self.n+self.h, len(self.l)-1-(not self.l[-1].has_more))
+			self.scrollToSelected()
+		elif (c == curses.KEY_END):
+			self.n = len(self.l)-1-(not self.l[-1].has_more)
+			self.scrollToSelected()
+		else: return super().key(c)
+		return True
+
+	def item(self, i):
+		ret, text, attrs = super().item(i)
+		if (not ret):
+			if (isinstance(self.l[i], self.LoadItem)):
+				if (not self.l[i].has_more): text = 'End.'
+				else: text = 'Loading...' if (self.loading) else 'Load more...'
+				ret = True
+		return (ret, text, attrs)
+
+	def select(self):
+		if (isinstance(self.l[self.n], self.LoadItem)):
+			if (not self.l[self.n].has_more): self.n -= 1
+			else: self.loading = True; self.toLoad = True
+			return True
 
 if (__name__ == '__main__'): logstarted(); exit()
 else: logimported()
