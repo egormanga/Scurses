@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 # Scurses
 
-import curses, curses.textpad
+import curses, curses.ascii, curses.textpad
 from abc import *
 from utils import *; logstart('Scurses')
 
