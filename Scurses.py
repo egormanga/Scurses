@@ -2,7 +2,6 @@
 # Scurses
 
 import curses, curses.ascii, curses.textpad
-from abc import *
 from utils import *; logstart('Scurses')
 
 class SCKey:
@@ -131,28 +130,59 @@ class SCApp(SCWindow):
 
 class SCView:
 	def init(self):
-		" Initialize self after curses.initscr() "
+		""" Initialize self after curses.initscr() """
 
 	def draw(self, stdscr):
-		" Draw self to `stdscr' "
+		""" Draw self to `stdscr' """
 		self.h, self.w = stdscr.getmaxyx()
 		stdscr.erase()
 
 	def key(self, c):
-		" Key pressed callback "
+		""" Key pressed callback """
 
-class SCSplitView(SCView, ABC):
+class SCTestView(SCView):
+	def __init__(self, char):
+		super().__init__()
+		self.char = char[0]
+
+	def draw(self, stdscr):
+		super().draw(stdscr)
+		try:
+			while (True): stdscr.addch(self.char)
+		except curses.error: pass
+
+### TODO?
+#class SCWindowView(SCView):
+#	def __init__(self):
+#		super().__init__()
+#		self.w = SCWindow()
+#
+#	def init(self):
+#		self.w.app = self.app
+#		self.w.stdscr = curses.newpad(1, 1)
+#		self.w.init()
+#
+#	def draw(self, stdscr):
+#		self.h, self.w = stdscr.getmaxyx()
+#		self.w.stdscr.resize(self.h, self.w)
+#		self.w.loop(0, 0, 0, 0, self.h, self.w)
+#
+#	def key(self, c):
+#		return self.w.key(c)
+###
+
+class SCSplitView(SCView, abc.ABC):
 	def __init__(self, *s, focus=0):
 		self.s, self.focus = s, focus
 		self.p = (*(SCWindow() for _ in range(len(self.s)+1)),)
 
 	def init(self):
-		for i in self.p:
-			i.app = self.app
-			i.stdscr = curses.newpad(1, 1)
-			i.init()
+		for i in range(len(self.p)):
+			self.p[i].app = self.app
+			self.p[i].stdscr = curses.newpad(1, 1)
+			self.p[i].init()
 
-	@abstractmethod
+	@abc.abstractmethod
 	def draw(self, stdscr):
 		pass
 
@@ -162,16 +192,16 @@ class SCSplitView(SCView, ABC):
 class SCVSplitView(SCSplitView):
 	def draw(self, stdscr):
 		self.h, self.w = stdscr.getmaxyx()
-		sl = (0, *(self.h+i if (i < 0) else i for i in self.s), self.h)
-		for i in range(len(sl)-1):
+		sl = (0, *(self.h--i if (i < 0) else i for i in self.s), self.h)
+		for i in range(len(self.p)):
 			self.p[i].stdscr.resize(sl[i+1]-sl[i], self.w)
 			self.p[i].loop(0, 0, sl[i], 0, sl[i+1], self.w)
 
 class SCHSplitView(SCSplitView):
 	def draw(self, stdscr):
 		self.h, self.w = stdscr.getmaxyx()
-		sl = (0, *(self.w+i if (i < 0) else i for i in self.s), self.w)
-		for i in range(len(sl)-1):
+		sl = (0, *(self.w--i if (i < 0) else i for i in self.s), self.w)
+		for i in range(len(self.p)):
 			self.p[i].stdscr.resize(self.h, sl[i+1]-sl[i])
 			self.p[i].loop(0, 0, 0, sl[i], self.h, sl[i+1])
 
@@ -216,7 +246,7 @@ class SCLoadingListView(SCListView):
 	def draw(self, stdscr):
 		super().draw(stdscr)
 		if (self.loading):
-			stdscr.addstr(0, 0, 'Loading'.center(self.w), curses.A_STANDOUT)
+			#stdscr.addstr(0, 0, 'Loading'.center(self.w), curses.A_STANDOUT)
 			self.loading = False
 			return
 		if (not self.l and not self.toLoad):
