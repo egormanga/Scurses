@@ -283,6 +283,12 @@ class SCSelectingListView(SCListView):
 		elif (c == curses.KEY_DOWN):
 			self.n = min(self.n+1, len(self.l)-1)
 			self.scrollToSelected()
+		elif (c == curses.KEY_IC):
+			self.n = max(0, self.n-1)
+			self.t = max(0, self.t-1)
+		elif (c == curses.KEY_DC):
+			self.n = min(self.n+1, len(self.l)-1)
+			self.t = min(self.t+1, max(len(self.l)-self.h+1, 0))
 		elif (c == curses.KEY_PPAGE):
 			self.n = max(self.n-self.h, 0)
 			self.scrollToSelected()
@@ -332,6 +338,9 @@ class SCLoadingSelectingListView(SCLoadingListView, SCSelectingListView):
 		if (c == curses.KEY_DOWN):
 			self.n = min(self.n+1, len(self.l)-1-(not self.l[-1].has_more))
 			self.scrollToSelected()
+		elif (c == curses.KEY_DC):
+			self.n = min(self.n+1, len(self.l)-1-(not self.l[-1].has_more))
+			self.t = min(self.t+1, max(len(self.l)-self.h-(not self.l[-1].has_more), 0))
 		elif (c == curses.KEY_NPAGE):
 			self.n = min(self.n+self.h, len(self.l)-1-(not self.l[-1].has_more))
 			self.scrollToSelected()
@@ -355,6 +364,8 @@ class SCLoadingSelectingListView(SCLoadingListView, SCSelectingListView):
 			if (not self.l[self.n].has_more): self.n -= 1
 			else: self.loading = True; self.toLoad = True
 			return True
+
+# TODO: SCTextBox
 
 if (__name__ == '__main__'): logstarted(); exit()
 else: logimported()
