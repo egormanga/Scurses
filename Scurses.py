@@ -100,30 +100,31 @@ class SCApp(SCWindow):
 	def __init__(self, frame_rate=60):
 		super().__init__()
 		self.frame_delay = 1/frame_rate
+		self.lastframe = 0
 		self.stopped = bool()
 
 	def quit(self):
 		self.views = None
-
-	def loop(self):
-		self.draw()
-		curses.doupdate()
-		try: c = self.stdscr.get_wch()
-		except curses.error: c = -1
-		self.key(SCKey(c))
 
 	def _run_loop(self, stdscr):
 		self.stdscr = stdscr
 		self.init()
 		while (True):
 			try:
-				start = time.time()
-				self.loop()
 				if (not self.views): break
-				delay_left = self.frame_delay-(time.time()-start)
-				if (delay_left > 0): time.sleep(delay_left) # optimization; sleep(0) takes more time.
+				self.proc()
+				try: self.key(SCKey(self.stdscr.get_wch()))
+				except curses.error:
+					if (time.time() < self.lastframe+self.frame_delay): continue
+					self.key(SCKey(-1))
+				self.draw()
+				curses.doupdate()
+				self.lastframe = time.time()
 			except KeyboardInterrupt: break
 		self.stdscr = None
+
+	@staticmethod
+	def proc(): pass
 
 	def run(self):
 		return curses.wrapper(self._run_loop)
@@ -301,7 +302,7 @@ class SCSelectingListView(SCListView):
 		elif (c == curses.KEY_END):
 			self.n = len(self.l)-1
 			self.scrollToSelected()
-		elif (c == '\n'):
+		elif (c == curses.ascii.NL):
 			self.select()
 		else: return super().key(c)
 		return True
