@@ -5,6 +5,8 @@ import curses, curses.ascii, curses.textpad
 from utils import *; logstart('Scurses')
 
 class SCKey:
+	__slots__ = ('c', 'ch')
+
 	def __init__(self, c):
 		if (isinstance(c, SCKey)): self.c, self.ch = c.c, c.ch; return
 		if (isinstance(c, str)):
@@ -59,6 +61,7 @@ class SCWindow:
 	def draw(self):
 		h, w = self.stdscr.getmaxyx()
 		if (self.views): self.top.draw(self.stdscr)
+		if (not self.debugstr): return
 		for ii, i in enumerate(self.debugstr):
 			if (ii >= h): break
 			self.stdscr.addstr(ii, (w-len(i))//2-1, i, curses.A_STANDOUT)
@@ -97,11 +100,16 @@ class SCWindow:
 		return self.views[-1]
 
 class SCApp(SCWindow):
-	def __init__(self, frame_rate=60):
+	def __init__(self, *, frame_rate=60, proc_rate=60):
 		super().__init__()
 		self.frame_delay = 1/frame_rate
+		self.proc_delay = int(10//proc_rate)
 		self.lastframe = 0
 		self.stopped = bool()
+
+	def init(self):
+		super().init()
+		if (self.proc_delay > 0): curses.halfdelay(self.proc_delay)
 
 	def quit(self):
 		self.views = None
@@ -130,13 +138,24 @@ class SCApp(SCWindow):
 		return curses.wrapper(self._run_loop)
 
 class SCView:
+	def __init__(self):
+		self.touched = True
+
 	def init(self):
 		""" Initialize self after curses.initscr() """
 
 	def draw(self, stdscr):
-		""" Draw self to `stdscr' """
+		""" Draw self to `stdscr'
+		Return: (ret)
+			ret: force stop recursive subclass processing.
+		"""
+		if (not self.touched): return True
+		self.touched = False
 		self.h, self.w = stdscr.getmaxyx()
 		stdscr.erase()
+
+	def touch(self):
+		self.touched = True
 
 	def key(self, c):
 		""" Key pressed callback """
@@ -147,7 +166,7 @@ class SCTestView(SCView):
 		self.char = char[0]
 
 	def draw(self, stdscr):
-		super().draw(stdscr)
+		if (super().draw(stdscr)): return True
 		try:
 			while (True): stdscr.addch(self.char)
 		except curses.error: pass
@@ -164,6 +183,7 @@ class SCTestView(SCView):
 #		self.w.init()
 #
 #	def draw(self, stdscr):
+#		if (not self.touched): return True
 #		self.h, self.w = stdscr.getmaxyx()
 #		self.w.stdscr.resize(self.h, self.w)
 #		self.w.loop(0, 0, 0, 0, self.h, self.w)
@@ -174,8 +194,9 @@ class SCTestView(SCView):
 
 class SCSplitView(SCView, abc.ABC):
 	def __init__(self, *s, focus=0):
+		super().__init__()
 		self.s, self.focus = s, focus
-		self.p = (*(SCWindow() for _ in range(len(self.s)+1)),)
+		self.p = tuple(SCWindow() for _ in range(len(self.s)+1))
 
 	def init(self):
 		for i in range(len(self.p)):
@@ -192,6 +213,8 @@ class SCSplitView(SCView, abc.ABC):
 
 class SCVSplitView(SCSplitView):
 	def draw(self, stdscr):
+		if (any(i.top.touched for i in self.p if i.views)): self.touched = True
+		if (not self.touched): return True
 		self.h, self.w = stdscr.getmaxyx()
 		sl = (0, *(self.h--i if (i < 0) else i for i in self.s), self.h)
 		for i in range(len(self.p)):
@@ -200,6 +223,8 @@ class SCVSplitView(SCSplitView):
 
 class SCHSplitView(SCSplitView):
 	def draw(self, stdscr):
+		if (any(i.top.touched for i in self.p if i.views)): self.touched = True
+		if (not self.touched): return True
 		self.h, self.w = stdscr.getmaxyx()
 		sl = (0, *(self.w--i if (i < 0) else i for i in self.s), self.w)
 		for i in range(len(self.p)):
@@ -208,19 +233,20 @@ class SCHSplitView(SCSplitView):
 
 class SCListView(SCView):
 	def __init__(self, l):
+		super().__init__()
 		self.l = l # List
 		self.t = int() # View offset
 		self.h = self.w = int()
 
 	def draw(self, stdscr):
-		super().draw(stdscr)
+		if (super().draw(stdscr)): return True
 		for i in range(self.t, min(self.t+self.h, len(self.l))):
 			ret, text, attrs = self.item(i)
 			stdscr.addstr(i-self.t, 0, text, attrs)
 
 	def key(self, c):
-		if (c == curses.KEY_UP): self.t -= 1
-		elif (c == curses.KEY_DOWN): self.t += 1
+		if (c == curses.KEY_UP): self.t -= 1; self.touch()
+		elif (c == curses.KEY_DOWN): self.t += 1; self.touch()
 		else: return False
 		return True
 
@@ -245,16 +271,19 @@ class SCLoadingListView(SCListView):
 		self.loading = bool()
 
 	def draw(self, stdscr):
-		super().draw(stdscr)
+		if (super().draw(stdscr)): return True
 		if (self.loading):
 			#stdscr.addstr(0, 0, 'Loading'.center(self.w), curses.A_STANDOUT)
 			self.loading = False
+			self.touch()
 			return
 		if (not self.l and not self.toLoad):
 			self.toLoad = True
+			self.touch()
 			return
 		if (self.toLoad):
 			self.load()
+			self.touch()
 			self.toLoad = False
 
 	def load(self):
@@ -275,7 +304,7 @@ class SCSelectingListView(SCListView):
 
 	def draw(self, stdscr):
 		self.n = max(0, min(len(self.l)-1, self.n))
-		super().draw(stdscr)
+		if (super().draw(stdscr)): return True
 
 	def key(self, c):
 		if (c == curses.KEY_UP):
@@ -287,9 +316,11 @@ class SCSelectingListView(SCListView):
 		elif (c == curses.KEY_IC):
 			#self.n = max(0, self.n-1)
 			self.t = max(0, self.t-1)
+			self.touch()
 		elif (c == curses.KEY_DC):
 			#self.n = min(self.n+1, len(self.l)-1)
 			self.t = min(self.t+1, max(len(self.l)-self.h+1, 0))
+			self.touch()
 		elif (c == curses.KEY_PPAGE):
 			self.n = max(self.n-self.h, 0)
 			self.scrollToSelected()
@@ -304,6 +335,7 @@ class SCSelectingListView(SCListView):
 			self.scrollToSelected()
 		elif (c == curses.ascii.NL):
 			self.select()
+			self.touch()
 		else: return super().key(c)
 		return True
 
@@ -316,10 +348,12 @@ class SCSelectingListView(SCListView):
 	def scrollToTop(self):
 		self.n = 0
 		self.t = 0
+		self.touch()
 
 	def scrollToSelected(self):
 		if (self.t > self.n): self.t = max(self.n, 0)
 		if (self.t+self.h <= self.n): self.t = min(self.n-self.h+1, len(self.l)-self.h+1)
+		self.touch()
 
 	def selectAndScroll(self, n):
 		self.n = n
@@ -342,6 +376,7 @@ class SCLoadingSelectingListView(SCLoadingListView, SCSelectingListView):
 		elif (c == curses.KEY_DC):
 			#self.n = min(self.n+1, len(self.l)-1-(not self.l[-1].has_more))
 			self.t = min(self.t+1, max(len(self.l)-self.h-(not self.l[-1].has_more), 0))
+			self.touch()
 		elif (c == curses.KEY_NPAGE):
 			self.n = min(self.n+self.h, len(self.l)-1-(not self.l[-1].has_more))
 			self.scrollToSelected()
@@ -371,4 +406,4 @@ class SCLoadingSelectingListView(SCLoadingListView, SCSelectingListView):
 if (__name__ == '__main__'): logstarted(); exit()
 else: logimported()
 
-# by Sdore, 2019
+# by Sdore, 2020
