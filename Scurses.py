@@ -55,6 +55,10 @@ class SCWindow:
 		self.views.append(view)
 		if (self.inited): view.init()
 
+	def popView(self):
+		del self.views[-1]
+		if (self.views): self.views[-1].touch()
+
 	def debugOut(self, *s, sep=' '):
 		self.debugstr = S(sep.join(map(str, s))).wrap(self.stdscr.getmaxyx()[1]//2).split('\n')
 
@@ -149,6 +153,7 @@ class SCView:
 		Return: (ret)
 			ret: force stop recursive subclass processing.
 		"""
+
 		if (not self.touched): return True
 		self.touched = False
 		self.h, self.w = stdscr.getmaxyx()
@@ -241,8 +246,10 @@ class SCListView(SCView):
 	def draw(self, stdscr):
 		if (super().draw(stdscr)): return True
 		for i in range(self.t, min(self.t+self.h, len(self.l))):
-			ret, text, attrs = self.item(i)
-			stdscr.addstr(i-self.t, 0, text, attrs)
+			ret, items = self.item(i)
+			stdscr.move(i-self.t, 0)
+			for text, attrs in items:
+				stdscr.addstr(text, attrs)
 
 	def key(self, c):
 		if (c == curses.KEY_UP): self.t -= 1; self.touch()
@@ -252,12 +259,12 @@ class SCListView(SCView):
 
 	def item(self, i):
 		""" Return list item for `self.l[i]'
-		Return: (ret, text, attrs)
+		Return: (ret, items)
 			ret: force stop recursive subclass processing.
-			text: title for the item.
-			attrs: curses attributes for the item.
+			items: list of (text, attrs) pairs (see `curses.window.addstr()')
 		"""
-		return (False, str(self.l[i]), 0)
+
+		return (False, [(str(self.l[i]), 0)])
 
 class SCLoadingListView(SCListView):
 	class LoadItem:
@@ -292,6 +299,7 @@ class SCLoadingListView(SCListView):
 		Return: (ret)
 			ret: force stop recursive subclass processing.
 		"""
+
 		if (isinstance(self.l[-1], self.LoadItem)):
 			if (not self.l[-1].has_more): self.l[-1].next_value = None; return True
 		return False
@@ -340,10 +348,12 @@ class SCSelectingListView(SCListView):
 		return True
 
 	def item(self, i):
-		ret, text, attrs = super().item(i)
+		ret, items = super().item(i)
 		if (not ret):
-			attrs |= curses.A_STANDOUT*(i==self.n) | curses.A_BOLD*(i==self.s)
-		return (ret, text, attrs)
+			for ii, (text, attrs) in enumerate(items):
+				attrs |= curses.A_STANDOUT*(i==self.n) | curses.A_BOLD*(i==self.s)
+				items[ii] = (text, attrs)
+		return (ret, items)
 
 	def scrollToTop(self):
 		self.n = 0
@@ -365,6 +375,7 @@ class SCSelectingListView(SCListView):
 		Return: (ret)
 			ret: force stop recursive subclass processing.
 		"""
+
 		self.s = self.n
 		return False
 
@@ -387,13 +398,14 @@ class SCLoadingSelectingListView(SCLoadingListView, SCSelectingListView):
 		return True
 
 	def item(self, i):
-		ret, text, attrs = super().item(i)
+		ret, items = super().item(i)
 		if (not ret):
 			if (isinstance(self.l[i], self.LoadItem)):
 				if (not self.l[i].has_more): text = 'End.'
 				else: text = 'Loading...' if (self.loading) else 'Load more...'
+				items = [(text, items[0][1])]
 				ret = True
-		return (ret, text, attrs)
+		return (ret, items)
 
 	def select(self):
 		if (isinstance(self.l[self.n], self.LoadItem)):
