@@ -4,6 +4,8 @@
 import curses, curses.ascii, curses.textpad
 from utils import *; logstart('Scurses')
 
+MOUSE_WHEEL = curses.BUTTON4_PRESSED | 2097152#curses.REPORT_MOUSE_POSITION |
+
 class SCKey:
 	__slots__ = ('c', 'ch')
 
@@ -76,6 +78,7 @@ class SCWindow:
 			if (c != self.waitrelease or time.time()-self.waitrelease_lastpressed > 0.05): self.waitrelease = None
 			else: self.waitrelease_lastpressed = time.time(); return
 		self.debugOut()
+		if (c == curses.KEY_RESIZE): self.top.touch()
 		for view in self.views[::-1]:
 			r = view.key(c)
 			if (r): return r
@@ -212,6 +215,11 @@ class SCSplitView(SCView, abc.ABC):
 	@abc.abstractmethod
 	def draw(self, stdscr):
 		pass
+
+	def touch(self):
+		super().touch()
+		for i in self.p:
+			i.top.touch()
 
 	def key(self, c):
 		return self.p[self.focus].key(c)
