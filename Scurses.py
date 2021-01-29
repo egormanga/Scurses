@@ -66,7 +66,8 @@ class SCWindow:
 
 	def draw(self):
 		h, w = self.stdscr.getmaxyx()
-		if (self.views): self.top.draw(self.stdscr)
+		for view in self.views:
+			view.draw(self.stdscr)
 		if (not self.debugstr): return
 		for ii, i in enumerate(self.debugstr):
 			if (ii >= h): break
@@ -78,8 +79,9 @@ class SCWindow:
 			if (c != self.waitrelease or time.time()-self.waitrelease_lastpressed > 0.05): self.waitrelease = None
 			else: self.waitrelease_lastpressed = time.time(); return
 		self.debugOut()
-		if (c == curses.KEY_RESIZE): self.top.touch()
 		for view in self.views[::-1]:
+			if (c == curses.KEY_RESIZE):
+				view.touch()
 			r = view.key(c)
 			if (r): return r
 		else:
@@ -204,13 +206,13 @@ class SCSplitView(SCView, abc.ABC):
 	def __init__(self, *s, focus=0):
 		super().__init__()
 		self.s, self.focus = s, focus
-		self.p = tuple(SCWindow() for _ in range(len(self.s)+1))
+		self.p = tuple(SCWindow() for _ in range(len(self.s)))
 
 	def init(self):
-		for i in range(len(self.p)):
-			self.p[i].app = self.app
-			self.p[i].stdscr = curses.newpad(1, 1)
-			self.p[i].init()
+		for w in self.p:
+			w.app = self.app
+			w.stdscr = curses.newpad(1, 1)
+			w.init()
 
 	@abc.abstractmethod
 	def draw(self, stdscr):
@@ -218,28 +220,34 @@ class SCSplitView(SCView, abc.ABC):
 
 	def touch(self):
 		super().touch()
-		for i in self.p:
-			i.top.touch()
+		for w in self.p:
+			w.top.touch()
 
 	def key(self, c):
 		return self.p[self.focus].key(c)
 
 class SCVSplitView(SCSplitView):
 	def draw(self, stdscr):
-		if (any(i.top.touched for i in self.p if i.views)): self.touched = True
+		if (any(w.top.touched for w in self.p if w.views)): self.touched = True
 		if (not self.touched): return True
 		self.h, self.w = stdscr.getmaxyx()
-		sl = (0, *(self.h--i if (i < 0) else i for i in self.s), self.h)
+
+		s = round((self.h-sum(self.s))/self.s.count(0))
+		sl = (0, *(p for p in [0] for i in self.s for p in [p + (i or s)]))
+
 		for i in range(len(self.p)):
 			self.p[i].stdscr.resize(sl[i+1]-sl[i], self.w)
 			self.p[i].loop(0, 0, sl[i], 0, sl[i+1], self.w)
 
 class SCHSplitView(SCSplitView):
 	def draw(self, stdscr):
-		if (any(i.top.touched for i in self.p if i.views)): self.touched = True
+		if (any(w.top.touched for w in self.p if w.views)): self.touched = True
 		if (not self.touched): return True
 		self.h, self.w = stdscr.getmaxyx()
-		sl = (0, *(self.w--i if (i < 0) else i for i in self.s), self.w)
+
+		s = round((self.w-sum(self.s))/self.s.count(0))
+		sl = (0, *(p for p in [0] for i in self.s for p in [p + (i or s)]))
+
 		for i in range(len(self.p)):
 			self.p[i].stdscr.resize(self.h, sl[i+1]-sl[i])
 			self.p[i].loop(0, 0, 0, sl[i], self.h, sl[i+1])
@@ -421,7 +429,129 @@ class SCLoadingSelectingListView(SCLoadingListView, SCSelectingListView):
 			else: self.loading = True; self.toLoad = True
 			return True
 
-# TODO: SCTextBox
+
+class SCTextBox(SCView):
+	def __init__(self):
+		super().__init__()
+		self.line = self.col = 0
+		self.lines = Sdict(str)
+
+	def init(self):
+		self.app.stdscr.leaveok(False)
+
+	def draw(self, stdscr):
+		if (super().draw(stdscr)): return True
+
+		x = y = pln = 0
+		for ln, l in sorted(self.lines.items()):
+			y += ln-pln
+			if (y >= self.h): break
+
+			x = 0
+			for c in l:
+				assert (c != '\t')
+				stdscr.addch(y, x, c, curses.A_STANDOUT*(y == self.line and x == self.col))
+				x += 1
+				if (x >= self.w): y += 1; x = 0
+				if (y >= self.h): break
+			if (y >= self.h): break
+
+			if (y == self.line and x <= self.col and self.col < self.w):
+				stdscr.addch(self.line, x, ' ', curses.A_STANDOUT)
+
+			pln = ln
+
+		if (y <= self.line and self.line < self.h and x <= self.col and self.col < self.w):
+			stdscr.addch(self.line, self.col, ' ', curses.A_STANDOUT)
+
+	def key(self, c):
+		ch = SCKey(c)
+		#y, x = self.stdscr.getyx()
+
+		#elif (ch == curses.ascii.SOH): # ^A
+		#	self.stdscr.move(y, 0)
+		#elif (ch == curses.ascii.EOT): # ^D
+		#	self.stdscr.delch()
+		#elif (ch == curses.ascii.ENQ): # ^E
+		#	if (self.stripspaces): self.stdscr.move(y, self._end_of_line(y))
+		#	else: self.stdscr.move(y, self.w-1)
+		#elif (ch in (curses.ascii.ACK, curses.KEY_RIGHT)): # ^F
+		#	if (x < self.w-1): self.stdscr.move(y, x+1)
+		#	elif (y == self.h-1): pass
+		#	else: self.stdscr.move(y+1, 0)
+		#elif (ch == curses.ascii.BEL): # ^G
+		#	pass#return False
+		#elif (ch == curses.ascii.NL): # ^J
+		#	if (self.h-1 == 0): pass#return False
+		#	elif (y < self.h-1): self.stdscr.move(y+1, 0)
+		#elif (ch == curses.ascii.VT): # ^K
+		#	if (x == 0 and self._end_of_line(y) == 0): self.stdscr.deleteln()
+		#	else:
+		#		self.stdscr.move(y, x)
+		#		self.stdscr.clrtoeol()
+		#elif (ch == curses.ascii.FF): # ^L
+		#	self.touch()
+		#elif (ch in (curses.ascii.SO, curses.KEY_DOWN)): # ^N
+		#	if (y < self.h-1):
+		#		self.stdscr.move(y+1, x)
+		#		if (x > self._end_of_line(y+1)): self.stdscr.move(y+1, self._end_of_line(y+1))
+		#elif (ch == curses.ascii.SI): # ^O
+		#	self.stdscr.insertln()
+		#elif (ch in (curses.ascii.DLE, curses.KEY_UP)): # ^P
+		#	if (y > 0):
+		#		self.stdscr.move(y-1, x)
+		#		if (x > self._end_of_line(y-1)): self.stdscr.move(y-1, self._end_of_line(y-1))
+		if (ch == curses.KEY_LEFT):
+			self.col = min(self.col, len(self.cline))-1
+			if (self.col < 0):
+				if (self.line > 0): self.col = self.w-1; self.line -= 1
+				else: self.col = 0
+		elif (ch == curses.KEY_RIGHT):
+			self.col += 1
+			if (self.col > len(self.cline)): self.line += 1; self.col = 0
+		elif (ch == curses.KEY_UP):
+			self.line = max(0, self.line-1)
+			#self.col = min(self.col, len(self.cline))
+		elif (ch == curses.KEY_DOWN):
+			self.line += 1
+		elif (ch in (curses.ascii.BS, curses.ascii.DEL, curses.KEY_BACKSPACE)):
+			if (self.cline):
+				self.col = min(self.col, len(self.cline))
+				self.cline = self.cline[:self.col-1]+self.cline[self.col:]
+				self.col -= 1
+				if (self.col < 0): self.col = self.w-1; self.line -= 1
+			else:
+				del self.cline
+				self.line = max(0, self.line-1)
+				self.col = 0
+		elif (ch == curses.ascii.NL):
+			self.line += 1
+			self.col = 0
+		elif (ch == curses.KEY_STAB):
+			self.cline += '\t'
+			self.col = self.col//8*8
+		elif (ch.ch.isprintable()):
+			self.cline += ch.ch
+			self.col += 1
+		else: return False
+		self.touch()
+		return True
+
+	@property
+	def text(self):
+		return '\n'.join(self.lines.get(i, '') for i in range(max(self.lines, default=0)+1))
+
+	@property
+	def cline(self):
+		return self.lines[self.line]
+
+	@cline.setter
+	def cline(self, x):
+		self.lines[self.line] = x
+
+	@cline.deleter
+	def cline(self):
+		del self.lines[self.line]
 
 if (__name__ == '__main__'): logstarted(); exit()
 else: logimported()
