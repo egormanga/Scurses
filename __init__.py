@@ -1,1 +1,2 @@
-Scurses.py
+from .Scurses import *
+del Scurses
