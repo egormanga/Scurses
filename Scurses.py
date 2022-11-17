@@ -591,7 +591,7 @@ class SCSelectingListView(SCListView):
 				self.n -= 1
 			self.touch()
 			self.scrollToHighlighted()
-		elif (c == curses.ascii.NL):
+		elif (c in (curses.KEY_ENTER, curses.ascii.NL)):
 			self.select()
 		else: return super().key(c)
 		return True
@@ -887,7 +887,7 @@ class SCTextBox(SCView):
 				self.line = max(0, self.line-1)
 				self.col = len(self.cline)
 				self.touch()
-		elif (ch == curses.ascii.NL):
+		elif (ch in (curses.KEY_ENTER, curses.ascii.NL)):
 			for ii, i in sorted(self.lines.items(), reverse=True):
 				if (ii <= self.line): break
 				self.lines[ii+1] = i
